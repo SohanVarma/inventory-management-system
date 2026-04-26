@@ -1,0 +1,9 @@
+node_modules/
+client/node_modules/
+server/node_modules/
+.env
+.DS_Store
+client/dist/
+server/database.json
+server/inventory.db
+npm-debug.log*
