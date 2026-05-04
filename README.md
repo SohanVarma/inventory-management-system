@@ -39,3 +39,5 @@ npm run dev
 Admin: `admin / admin123`
 
 Staff: `staff / staff123`
+
+Deployment URL: http://localhost:5173/
