@@ -175,77 +175,6 @@ app.post('/api/sales', auth, async (req, res) => {
   res.json({ success: true, total });
 });
 
-app.get('/api/transfers', auth, async (req, res) => {
-  const [rows] = await db.query('SELECT * FROM transfers ORDER BY createdAt DESC');
-  res.json(rows);
-});
-
-app.post('/api/transfers', auth, adminOnly, async (req, res) => {
-  const { productId, quantity, toBranch } = req.body;
-  const transferQty = Number(quantity);
-
-  if (!productId || !toBranch || !transferQty || transferQty <= 0) {
-    return res.status(400).json({ error: 'Select product, destination branch, and valid quantity' });
-  }
-
-  const connection = await db.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [products] = await connection.query('SELECT * FROM products WHERE id=? FOR UPDATE', [productId]);
-
-    if (products.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Product not found' });
-    }
-
-    const sourceProduct = products[0];
-
-    if (sourceProduct.branch === toBranch) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'Source and destination branches cannot be the same' });
-    }
-
-    if (Number(sourceProduct.quantity) < transferQty) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'Not enough stock in source branch' });
-    }
-
-    await connection.query('UPDATE products SET quantity = quantity - ? WHERE id=?', [transferQty, productId]);
-
-    const [destinationRows] = await connection.query(
-      'SELECT * FROM products WHERE sku=? AND branch=? FOR UPDATE',
-      [sourceProduct.sku, toBranch]
-    );
-
-    if (destinationRows.length > 0) {
-      await connection.query(
-        'UPDATE products SET quantity = quantity + ? WHERE id=?',
-        [transferQty, destinationRows[0].id]
-      );
-    } else {
-      await connection.query(
-        'INSERT INTO products (name, category, sku, barcode, quantity, price, lowStockLimit, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [sourceProduct.name, sourceProduct.category, sourceProduct.sku, sourceProduct.barcode, transferQty, sourceProduct.price, sourceProduct.lowStockLimit, toBranch]
-      );
-    }
-
-    await connection.query(
-      'INSERT INTO transfers (productId, productName, sku, quantity, fromBranch, toBranch, transferredBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [sourceProduct.id, sourceProduct.name, sourceProduct.sku, transferQty, sourceProduct.branch, toBranch, req.user.username]
-    );
-
-    await connection.commit();
-    res.json({ success: true, message: `Transferred ${transferQty} units to ${toBranch}` });
-  } catch (err) {
-    await connection.rollback();
-    res.status(500).json({ error: 'Transfer failed. Please try again.' });
-  } finally {
-    connection.release();
-  }
-});
-
 app.get('/api/dashboard', auth, async (req, res) => {
   const [products] = await db.query('SELECT * FROM products');
   const [sales] = await db.query('SELECT * FROM sales');
@@ -265,6 +194,103 @@ app.get('/api/dashboard', auth, async (req, res) => {
     products,
     sales
   });
+});
+
+app.get('/api/transfers', auth, async (req, res) => {
+  const [rows] = await db.query('SELECT * FROM transfers ORDER BY createdAt DESC');
+  res.json(rows);
+});
+
+app.post('/api/transfers', auth, adminOnly, async (req, res) => {
+  const { productId, quantity, toBranch } = req.body;
+  const transferQty = Number(quantity);
+
+  if (!productId || !toBranch || !transferQty || transferQty <= 0) {
+    return res.status(400).json({ error: 'Select product, destination branch, and valid quantity' });
+  }
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [products] = await connection.query(
+      'SELECT * FROM products WHERE id=? FOR UPDATE',
+      [productId]
+    );
+
+    if (products.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const sourceProduct = products[0];
+
+    if (sourceProduct.branch === toBranch) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Source and destination branches cannot be the same' });
+    }
+
+    if (Number(sourceProduct.quantity) < transferQty) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Not enough stock in source branch' });
+    }
+
+    await connection.query(
+      'UPDATE products SET quantity = quantity - ? WHERE id=?',
+      [transferQty, productId]
+    );
+
+    const [destinationRows] = await connection.query(
+      'SELECT * FROM products WHERE sku=? AND branch=? FOR UPDATE',
+      [sourceProduct.sku, toBranch]
+    );
+
+    if (destinationRows.length > 0) {
+      await connection.query(
+        'UPDATE products SET quantity = quantity + ? WHERE id=?',
+        [transferQty, destinationRows[0].id]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO products (name, category, sku, barcode, quantity, price, lowStockLimit, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          sourceProduct.name,
+          sourceProduct.category,
+          sourceProduct.sku,
+          sourceProduct.barcode,
+          transferQty,
+          sourceProduct.price,
+          sourceProduct.lowStockLimit,
+          toBranch
+        ]
+      );
+    }
+
+    await connection.query(
+      'INSERT INTO transfers (productId, productName, sku, quantity, fromBranch, toBranch, transferredBy) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        sourceProduct.id,
+        sourceProduct.name,
+        sourceProduct.sku,
+        transferQty,
+        sourceProduct.branch,
+        toBranch,
+        req.user.username
+      ]
+    );
+
+    await connection.commit();
+    res.json({ success: true, message: `Transferred ${transferQty} units to ${toBranch}` });
+  } catch (err) {
+  await connection.rollback();
+  console.error('TRANSFER ERROR:', err);
+  res.status(500).json({
+    error: err.message || 'Transfer failed. Please try again.'
+  });
+} finally {
+  connection.release();
+}
 });
 
 app.listen(PORT, () => {

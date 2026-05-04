@@ -274,6 +274,163 @@ function Sales({ token, products, sales, refresh }) {
   );
 }
 
+function BranchTransfer({ token, user, products, refresh }) {
+  const branches = useMemo(
+    () => [...new Set(products.map(p => p.branch).filter(Boolean))],
+    [products]
+  );
+
+  const [productId, setProductId] = useState('');
+  const [quantity, setQuantity] = useState(1);
+  const [toBranch, setToBranch] = useState('');
+  const [transfers, setTransfers] = useState([]);
+  const [message, setMessage] = useState('');
+
+  async function loadTransfers() {
+    try {
+      const data = await request('/transfers', token);
+      setTransfers(data);
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  useEffect(() => {
+    if (token) loadTransfers();
+  }, [token]);
+
+  async function transferStock(e) {
+    e.preventDefault();
+    setMessage('');
+
+    try {
+      const result = await request('/transfers', token, {
+        method: 'POST',
+        body: JSON.stringify({ productId, quantity, toBranch })
+      });
+
+      setMessage(result.message || 'Stock transferred successfully');
+      setProductId('');
+      setQuantity(1);
+      setToBranch('');
+
+      await refresh();
+      await loadTransfers();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>Branch-wise Stock Transfer</h2>
+        <span>
+          {user.role === 'admin'
+            ? 'Move stock between branches'
+            : 'Staff can view transfer history'}
+        </span>
+      </div>
+
+      {user.role === 'admin' && (
+        <form className="gridForm colorfulForm" onSubmit={transferStock}>
+          <select
+            value={productId}
+            onChange={e => setProductId(e.target.value)}
+            required
+          >
+            <option value="">Select source product</option>
+            {products.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name} — {p.branch} — Qty {p.quantity}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="number"
+            min="1"
+            placeholder="Quantity to transfer"
+            value={quantity}
+            onChange={e => setQuantity(e.target.value)}
+            required
+          />
+
+          <input
+            list="branch-options"
+            placeholder="Destination branch"
+            value={toBranch}
+            onChange={e => setToBranch(e.target.value)}
+            required
+          />
+
+          <datalist id="branch-options">
+            {branches.map(branch => (
+              <option key={branch} value={branch} />
+            ))}
+            <option value="Hyderabad" />
+            <option value="Bangalore" />
+            <option value="Chennai" />
+            <option value="Mumbai" />
+          </datalist>
+
+          <button className="primaryBtn">Transfer Stock</button>
+        </form>
+      )}
+
+      {message && (
+        <div
+          className={
+            message.toLowerCase().includes('failed') ||
+            message.toLowerCase().includes('not') ||
+            message.toLowerCase().includes('cannot')
+              ? 'error'
+              : 'notice'
+          }
+        >
+          {message}
+        </div>
+      )}
+
+      <h3>Transfer History</h3>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>SKU</th>
+            <th>Qty</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Transferred By</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {transfers.map(t => (
+            <tr key={t.id}>
+              <td>{t.productName}</td>
+              <td>{t.sku}</td>
+              <td>{t.quantity}</td>
+              <td>{t.fromBranch}</td>
+              <td>{t.toBranch}</td>
+              <td>{t.transferredBy}</td>
+              <td>{new Date(t.createdAt).toLocaleString()}</td>
+            </tr>
+          ))}
+
+          {transfers.length === 0 && (
+            <tr>
+              <td colSpan="7">No transfers recorded yet.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function BarcodeScanner({ token }) {
   const [code, setCode] = useState('');
   const [product, setProduct] = useState(null);
@@ -357,6 +514,9 @@ function App() {
         <button className={tab === 'products' ? 'active' : ''} onClick={() => setTab('products')}>Product Management</button>
         <button className={tab === 'sales' ? 'active' : ''} onClick={() => setTab('sales')}>Sales History</button>
         <button className={tab === 'barcode' ? 'active' : ''} onClick={() => setTab('barcode')}>Barcode Scanner</button>
+        <button className={tab === 'transfer' ? 'active' : ''} onClick={() => setTab('transfers')}>
+  Branch Transfer
+</button>
         {user.role === 'admin' && <button className={tab === 'suppliers' ? 'active' : ''} onClick={() => setTab('suppliers')}>Supplier Management</button>}
         <button className="logout" onClick={logout}>Logout</button>
       </aside>
@@ -367,6 +527,14 @@ function App() {
         {tab === 'sales' && <Sales token={token} products={products} sales={sales} refresh={refresh} />}
         {tab === 'barcode' && <BarcodeScanner token={token} />}
         {tab === 'suppliers' && user.role === 'admin' && <Suppliers token={token} />}
+          {tab === 'transfers' && (
+  <BranchTransfer
+    token={token}
+    user={user}
+    products={products}
+    refresh={refresh}
+  />
+)}
       </main>
     </div>
   );
